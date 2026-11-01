@@ -40,7 +40,9 @@ How the web app maps to this one:
 
 The domain rules carry over unchanged: completing a repeating task never resets it in place (the
 completed row stays as history and a new row is created for the next occurrence), schedule-based
-repeats count from the previous due date while "movable" counts from the completion date, a day
+repeats count from the previous due date while "movable" counts from the completion date,
+monthly and yearly repeats stay on their day of the month (a task due on the 31st repeats Jan 31,
+Feb 28, Mar 31), a day
 whose time drops to zero loses its note too, and deleting a category detaches every project, task
 and time item that used it.
 

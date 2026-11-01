@@ -32,18 +32,34 @@ pub fn add_days(date: NaiveDate, days: i64) -> NaiveDate {
     date + Duration::days(days)
 }
 
-/// Like JavaScript's `setMonth(getMonth() + months)`: the day of month is kept and overflows into
-/// the following month when the target month is shorter (Jan 31 + 1 month = Mar 3).
+/// The same day `months` later, or the last day of that month when it's shorter
+/// (Jan 31 + 1 month = Feb 28).
 pub fn add_months(date: NaiveDate, months: i32) -> NaiveDate {
+    add_months_on_day(date, months, date.day())
+}
+
+/// Day `day` of the month `months` after `date`'s, or that month's last day when it's shorter.
+pub fn add_months_on_day(date: NaiveDate, months: i32, day: u32) -> NaiveDate {
     let total = date.year() * 12 + date.month0() as i32 + months;
     let first = NaiveDate::from_ymd_opt(total.div_euclid(12), total.rem_euclid(12) as u32 + 1, 1)
         .expect("valid month");
-    add_days(first, i64::from(date.day()) - 1)
+    first
+        .with_day(day.clamp(1, last_day_of_month(first)))
+        .expect("day within the month")
 }
 
-/// Like JavaScript's `setFullYear(getFullYear() + years)`: Feb 29 rolls over to Mar 1.
+/// The same date `years` later; Feb 29 becomes Feb 28 in a non-leap year.
 pub fn add_years(date: NaiveDate, years: i32) -> NaiveDate {
     add_months(date, years * 12)
+}
+
+/// The number of the last day in `date`'s month (28 to 31).
+pub fn last_day_of_month(date: NaiveDate) -> u32 {
+    let first = date.with_day(1).expect("day 1 exists");
+    let next = first
+        .checked_add_months(chrono::Months::new(1))
+        .expect("in range");
+    (next - first).num_days() as u32
 }
 
 /// "Nov 1, 2026", or "—" with no date.
@@ -77,12 +93,23 @@ mod tests {
     }
 
     #[test]
-    fn month_arithmetic_overflows_like_javascript() {
+    fn month_arithmetic_clamps_to_the_end_of_shorter_months() {
         assert_eq!(to_iso(add_months(d("2026-07-27"), 1)), "2026-08-27");
         assert_eq!(to_iso(add_months(d("2026-12-15"), 1)), "2027-01-15");
-        assert_eq!(to_iso(add_months(d("2026-01-31"), 1)), "2026-03-03");
+        assert_eq!(to_iso(add_months(d("2026-01-31"), 1)), "2026-02-28");
+        assert_eq!(to_iso(add_months(d("2028-01-31"), 1)), "2028-02-29");
         assert_eq!(to_iso(add_months(d("2026-03-10"), -3)), "2025-12-10");
-        assert_eq!(to_iso(add_years(d("2028-02-29"), 1)), "2029-03-01");
+        assert_eq!(to_iso(add_years(d("2028-02-29"), 1)), "2029-02-28");
+        assert_eq!(
+            to_iso(add_months_on_day(d("2026-02-28"), 1, 31)),
+            "2026-03-31"
+        );
+        assert_eq!(
+            to_iso(add_months_on_day(d("2026-03-31"), 1, 31)),
+            "2026-04-30"
+        );
+        assert_eq!(last_day_of_month(d("2026-02-10")), 28);
+        assert_eq!(last_day_of_month(d("2026-12-31")), 31);
     }
 
     #[test]

@@ -5,10 +5,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use crate::date::{now_iso, parse_iso, to_iso, today};
+use crate::date::{last_day_of_month, now_iso, parse_iso, to_iso, today};
 use crate::domain::next_due_date;
 use crate::model::{
     Category, Id, Project, ProjectInput, Settings, Subcategory, Task, TaskInput, ThemeMode,
@@ -426,10 +426,11 @@ impl Store {
         }
 
         let previous_due = task.due_date.as_deref().and_then(parse_iso);
+        let anchor_day = previous_due.map(|d| self.series_anchor_day(&task, d));
         let next_id = uuid();
         self.data.tasks.push(Task {
             id: next_id.clone(),
-            due_date: next_due_date(task.repeat, completion, previous_due).map(to_iso),
+            due_date: next_due_date(task.repeat, completion, previous_due, anchor_day).map(to_iso),
             pinned: false,
             completed: false,
             completed_at: None,
@@ -440,6 +441,23 @@ impl Store {
         });
         self.save()?;
         Ok(Some(next_id))
+    }
+
+    /// The day of month a monthly or yearly series falls on: the previous due date's day, unless
+    /// that was a short month's last day standing in for a later day. Then the series' first due
+    /// date says which day it really is, so Jan 31, Feb 28 is followed by Mar 31, not Mar 28.
+    fn series_anchor_day(&self, task: &Task, previous_due: NaiveDate) -> u32 {
+        let day = previous_due.day();
+        if day < last_day_of_month(previous_due) {
+            return day;
+        }
+        self.data
+            .task(&task.series_id)
+            .and_then(|first| first.due_date.as_deref())
+            .and_then(parse_iso)
+            .map(|first| first.day())
+            .filter(|&first| first > day)
+            .unwrap_or(day)
     }
 
     /// Plain field flip. Un-completing a repeating task's history row doesn't retract the next
@@ -774,6 +792,67 @@ mod tests {
         assert_eq!(next.due_date.as_deref(), Some("2026-08-03"));
         assert_eq!(next.series_id, t);
         assert_eq!(next.previous_instance_id.as_ref(), Some(&t));
+    }
+
+    /// Completes the open occurrence of a series again and again, returning each new due date.
+    fn complete_repeatedly(s: &mut Store, first: &str, times: usize) -> Vec<String> {
+        let mut current = first.to_string();
+        (0..times)
+            .map(|_| {
+                current = s.complete_task(&current, today()).unwrap().unwrap();
+                s.data.task(&current).unwrap().due_date.clone().unwrap()
+            })
+            .collect()
+    }
+
+    fn repeating(s: &mut Store, due: &str, repeat: RepeatConfig) -> Id {
+        s.add_task(TaskInput {
+            title: "Repeats".into(),
+            due_date: Some(due.into()),
+            repeat,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn monthly_series_keep_their_day_through_short_months() {
+        let mut s = store();
+        let t = repeating(&mut s, "2026-01-31", RepeatConfig::Monthly);
+        assert_eq!(
+            complete_repeatedly(&mut s, &t, 4),
+            ["2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"]
+        );
+
+        let t = repeating(&mut s, "2026-01-30", RepeatConfig::Monthly);
+        assert_eq!(
+            complete_repeatedly(&mut s, &t, 2),
+            ["2026-02-28", "2026-03-30"]
+        );
+
+        let t = repeating(&mut s, "2028-02-29", RepeatConfig::Yearly);
+        assert_eq!(
+            complete_repeatedly(&mut s, &t, 4),
+            ["2029-02-28", "2030-02-28", "2031-02-28", "2032-02-29"]
+        );
+    }
+
+    #[test]
+    fn an_edited_due_date_becomes_the_series_day() {
+        let mut s = store();
+        let t = repeating(&mut s, "2026-01-31", RepeatConfig::Monthly);
+        let next = s.complete_task(&t, today()).unwrap().unwrap();
+        // Moving an occurrence to mid-month changes the day from then on.
+        s.data
+            .tasks
+            .iter_mut()
+            .find(|x| x.id == next)
+            .unwrap()
+            .due_date = Some("2026-02-15".into());
+        assert_eq!(
+            complete_repeatedly(&mut s, &next, 2),
+            ["2026-03-15", "2026-04-15"]
+        );
     }
 
     #[test]
