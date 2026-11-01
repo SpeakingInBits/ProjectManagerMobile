@@ -15,7 +15,7 @@ use crate::model::{RepeatConfig, Task};
 ///
 /// Monthly and yearly repeats fall on `anchor_day` (the base date's day when `None`), or on the
 /// last day of a month too short for it: a series anchored on the 31st goes Jan 31, Feb 28,
-/// Mar 31. The web app instead overflows like JavaScript dates (Jan 31 + 1 month = Mar 3).
+/// Mar 31.
 pub fn next_due_date(
     repeat: RepeatConfig,
     completion: NaiveDate,
