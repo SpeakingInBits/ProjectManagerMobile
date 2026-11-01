@@ -1,0 +1,353 @@
+// Bodies shown in the bottom sheet. Field state lives in the App global; Rust reads it on submit.
+
+import { Theme, Btn, TextField, TextArea, Select, ToggleRow, FieldLabel } from "theme.slint";
+import { DateField } from "components.slint";
+import { App } from "state.slint";
+
+component FormActions inherits HorizontalLayout {
+    in property <string> submit-label;
+    in property <bool> can-submit: true;
+    in property <bool> danger;
+    callback submit();
+    spacing: Theme.space-3;
+    padding-top: Theme.space-2;
+    Btn {
+        horizontal-stretch: 1;
+        text: "Cancel";
+        secondary: true;
+        clicked => { App.close-sheet(); }
+    }
+    Btn {
+        horizontal-stretch: 1;
+        text: root.submit-label;
+        enabled: root.can-submit;
+        danger: root.danger;
+        clicked => { root.submit(); }
+    }
+}
+
+component Hint inherits Text {
+    color: Theme.text-muted;
+    font-size: Theme.font-sm;
+    wrap: word-wrap;
+}
+
+component ErrorText inherits Text {
+    color: Theme.danger;
+    font-size: Theme.font-sm;
+    wrap: word-wrap;
+}
+
+component TitleField inherits VerticalLayout {
+    in-out property <string> text;
+    in-out property <bool> missing;
+    spacing: Theme.space-1;
+    TextField {
+        label: "Title";
+        text <=> root.text;
+        invalid: root.missing;
+        edited => { root.missing = false; }
+    }
+    if root.missing: ErrorText { text: "Enter a title."; }
+}
+
+// Category + subcategory pickers; the subcategory list follows the chosen category.
+component CategoryPicker inherits VerticalLayout {
+    in-out property <int> category;
+    in-out property <int> subcategory;
+    property <[string]> subcategories: App.subcategory-options(root.category);
+    spacing: Theme.space-4;
+    Select {
+        label: "Category";
+        options: App.category-options;
+        selected <=> root.category;
+        changed => { root.subcategory = 0; }
+    }
+    if root.category > 0: Select {
+        label: "Subcategory";
+        options: root.subcategories;
+        selected <=> root.subcategory;
+    }
+}
+
+export component ProjectForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    TitleField {
+        text <=> App.pf-title;
+        missing <=> App.pf-title-missing;
+    }
+    TextArea {
+        label: "Description";
+        text <=> App.pf-description;
+    }
+    DateField {
+        label: "Due date";
+        optional: true;
+        date <=> App.pf-due;
+        has-value <=> App.pf-has-due;
+    }
+    CategoryPicker {
+        category <=> App.pf-category;
+        subcategory <=> App.pf-subcategory;
+    }
+    FormActions {
+        submit-label: App.pf-editing ? "Save changes" : "Create project";
+        submit => { App.submit-project(); }
+    }
+}
+
+export component TaskForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    TitleField {
+        text <=> App.tf-title;
+        missing <=> App.tf-title-missing;
+    }
+    TextArea {
+        label: "Description";
+        text <=> App.tf-description;
+    }
+    DateField {
+        label: "Due date";
+        optional: true;
+        date <=> App.tf-due;
+        has-value <=> App.tf-has-due;
+    }
+    Select {
+        label: "Project";
+        options: App.project-options;
+        selected <=> App.tf-project;
+    }
+    CategoryPicker {
+        category <=> App.tf-category;
+        subcategory <=> App.tf-subcategory;
+    }
+    Select {
+        label: "Repeat";
+        options: [
+            "Never",
+            "Daily",
+            "Weekly",
+            "Monthly",
+            "Yearly",
+            "Custom (every N days)",
+            "Movable (N days after completion)"
+        ];
+        selected <=> App.tf-repeat;
+    }
+    if App.tf-repeat >= 5: VerticalLayout {
+        spacing: Theme.space-1;
+        TextField {
+            label: "Repeat every (days)";
+            input-type: InputType.number;
+            text <=> App.tf-interval;
+        }
+        Hint {
+            text: App.tf-repeat == 5
+                ? "Counts from the previous due date."
+                : "Counts from the day you complete the task.";
+        }
+    }
+    FormActions {
+        submit-label: App.tf-editing ? "Save changes" : "Create task";
+        submit => { App.submit-task(); }
+    }
+}
+
+export component TimeItemForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    TitleField {
+        text <=> App.ef-title;
+        missing <=> App.ef-title-missing;
+    }
+    TextArea {
+        label: "Description";
+        text <=> App.ef-description;
+    }
+    Select {
+        label: "Category";
+        options: App.category-options;
+        selected <=> App.ef-category;
+    }
+    FormActions {
+        submit-label: App.ef-editing ? "Save changes" : "Create item";
+        submit => { App.submit-time-item(); }
+    }
+    // Merging folds this item's time into another and deletes this one; only offered when
+    // there's another item to merge into.
+    if App.ef-can-merge: VerticalLayout {
+        padding-top: Theme.space-4;
+        spacing: Theme.space-2;
+        Rectangle {
+            height: 1px;
+            background: Theme.border;
+        }
+        Text {
+            text: "Merge";
+            color: Theme.text;
+            font-size: Theme.font-md;
+            font-weight: 600;
+        }
+        Hint { text: "Move this item's logged time and notes into another item, then delete this one."; }
+        Btn {
+            text: "Merge into another item…";
+            secondary: true;
+            clicked => { App.open-merge(); }
+        }
+    }
+}
+
+export component MergeForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    Text {
+        text: App.merge-summary;
+        color: Theme.text;
+        font-size: Theme.font-base;
+        wrap: word-wrap;
+    }
+    Select {
+        label: "Merge into";
+        options: App.merge-options;
+        selected <=> App.merge-index;
+    }
+    FormActions {
+        submit-label: "Merge";
+        danger: true;
+        can-submit: App.merge-index > 0;
+        submit => { App.submit-merge(); }
+    }
+}
+
+export component TimeSettingsForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    Hint { text: "Choose the date that time and notes are logged to. Useful for filling in days you missed."; }
+    HorizontalLayout {
+        spacing: Theme.space-2;
+        DateField {
+            horizontal-stretch: 1;
+            label: "Entry date";
+            date <=> App.ts-date;
+        }
+        VerticalLayout {
+            alignment: end;
+            Btn {
+                text: "Use today";
+                secondary: true;
+                clicked => { App.ts-date = App.today; }
+            }
+        }
+    }
+    ToggleRow {
+        text: "Group items by category";
+        checked <=> App.ts-group;
+    }
+    ToggleRow {
+        text: "Sort items alphabetically";
+        checked <=> App.ts-sort;
+    }
+    FormActions {
+        submit-label: "Save";
+        submit => { App.submit-time-settings(); }
+    }
+}
+
+export component TaskSettingsForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    ToggleRow {
+        text: "Ask for confirmation before completing a task";
+        checked <=> App.ks-confirm;
+    }
+    FormActions {
+        submit-label: "Save";
+        submit => { App.submit-task-settings(); }
+    }
+}
+
+export component DayNoteForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    Hint { text: App.note-subtitle; }
+    TextArea {
+        label: "Note";
+        text <=> App.note-text;
+    }
+    FormActions {
+        submit-label: "Save note";
+        submit => { App.submit-note(); }
+    }
+}
+
+export component HistoryList inherits VerticalLayout {
+    spacing: Theme.space-2;
+    Hint { text: "Day-by-day time history. Tap a day to add or edit its note."; }
+    if App.history-rows.length == 0: Text {
+        text: "No time logged yet.";
+        color: Theme.text-muted;
+        font-size: Theme.font-base;
+    }
+    for row in App.history-rows: Rectangle {
+        border-radius: Theme.radius-sm;
+        border-width: 1px;
+        border-color: Theme.border;
+        background: touch.pressed ? Theme.bg : Theme.surface;
+        accessible-role: button;
+        accessible-label: row.label + ", " + row.minutes;
+        accessible-description: row.note != "" ? "Edit note for this day" : "Add note for this day";
+        accessible-action-default => { touch.clicked(); }
+        touch := TouchArea {
+            clicked => { App.history-pick(row.date); }
+        }
+        VerticalLayout {
+            padding: Theme.space-3;
+            spacing: 2px;
+            HorizontalLayout {
+                Text {
+                    text: row.label;
+                    color: Theme.text;
+                    font-size: Theme.font-base;
+                    font-weight: 600;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: row.minutes;
+                    color: Theme.text;
+                    font-size: Theme.font-base;
+                    font-weight: 700;
+                }
+            }
+            Text {
+                text: row.note != "" ? row.note : "Add note…";
+                color: row.note != "" ? Theme.text : Theme.text-muted;
+                font-size: Theme.font-sm + 1px;
+                font-italic: row.note == "";
+                wrap: word-wrap;
+            }
+        }
+    }
+    HorizontalLayout {
+        padding-top: Theme.space-2;
+        Btn {
+            horizontal-stretch: 1;
+            text: "Close";
+            secondary: true;
+            clicked => { App.close-sheet(); }
+        }
+    }
+}
+
+export component RenameForm inherits VerticalLayout {
+    spacing: Theme.space-4;
+    VerticalLayout {
+        spacing: Theme.space-1;
+        TextField {
+            label: "Name";
+            text <=> App.rename-text;
+            invalid: App.rename-missing;
+            edited => { App.rename-missing = false; }
+            accepted => { App.submit-rename(); }
+        }
+        if App.rename-missing: ErrorText { text: "Enter a name."; }
+    }
+    FormActions {
+        submit-label: "Save";
+        submit => { App.submit-rename(); }
+    }
+}

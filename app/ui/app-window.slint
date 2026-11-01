@@ -1,0 +1,323 @@
+// App shell: top bar, current page, bottom navigation, bottom sheet and dialogs.
+
+import { Theme, Icons, Icon, IconBtn, Btn } from "theme.slint";
+import { ProjectsView, ProjectDetailView, TasksView, TimeView, CategoriesView } from "views.slint";
+import { ProjectForm, TaskForm, TimeItemForm, MergeForm, TimeSettingsForm, TaskSettingsForm, DayNoteForm, HistoryList, RenameForm } from "forms.slint";
+import { App } from "state.slint";
+
+export { App, Theme }
+
+component NavTab inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <int> page;
+    property <bool> active: App.page == page;
+    horizontal-stretch: 1;
+    accessible-role: tab;
+    accessible-label: label;
+    accessible-checked: active;
+    accessible-action-default => { touch.clicked(); }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        HorizontalLayout {
+            alignment: center;
+            Icon {
+                icon: root.icon;
+                color: root.active ? Theme.primary : Theme.text-muted;
+                width: 22px;
+                height: 22px;
+            }
+        }
+        Text {
+            text: root.label;
+            color: root.active ? Theme.primary : Theme.text-muted;
+            font-size: 11px;
+            font-weight: root.active ? 600 : 400;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea {
+        clicked => {
+            App.page = root.page;
+            App.page-changed(root.page);
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Project Manager";
+    icon: @image-url("../assets/icon-192.png");
+    preferred-width: 420px;
+    preferred-height: 860px;
+    min-width: 320px;
+    min-height: 480px;
+    background: Theme.bg;
+    default-font-size: 16px;
+
+    property <length> inset-top: self.safe-area-insets.top;
+    property <length> inset-bottom: self.safe-area-insets.bottom;
+    property <length> inset-left: self.safe-area-insets.left;
+    property <length> inset-right: self.safe-area-insets.right;
+    property <length> keyboard: self.virtual-keyboard-size.height;
+    property <[string]> titles: ["Projects", "Tasks", "Time Tracking", "Categories"];
+    property <bool> in-detail: App.page == 0 && App.detail-open;
+
+    changed width => { App.window-width = self.width; }
+    changed height => { App.window-height = self.height; }
+    init => {
+        App.window-width = self.width;
+        App.window-height = self.height;
+    }
+
+    // Back must reach `keys`, so take focus back whenever the field that had it may have been
+    // destroyed (closing a sheet or dialog, switching pages). Otherwise nothing has focus, the
+    // Back key goes unhandled, and Android closes the app.
+    property <int> sheet: App.sheet;
+    property <bool> dialog: App.dialog-visible;
+    property <int> page: App.page;
+    property <bool> detail: App.detail-open;
+    changed sheet => { keys.focus(); }
+    changed dialog => { keys.focus(); }
+    changed page => { keys.focus(); }
+    changed detail => { keys.focus(); }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        // The Android back button closes the open dialog, sheet or project before leaving the app.
+        key-pressed(event) => {
+            if event.text == Key.Back || event.text == Key.Escape {
+                if App.dialog-visible {
+                    App.dialog-cancelled();
+                    return accept;
+                }
+                if App.sheet != 0 {
+                    App.close-sheet();
+                    return accept;
+                }
+                if root.in-detail {
+                    App.close-project();
+                    return accept;
+                }
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding-left: root.inset-left;
+            padding-right: root.inset-right;
+
+            // Top bar
+            Rectangle {
+                height: 56px + root.inset-top;
+                background: Theme.surface;
+                Rectangle {
+                    y: parent.height - 1px;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    // Centers the 44px buttons in the 56px bar.
+                    padding-top: root.inset-top + 6px;
+                    padding-bottom: 6px;
+                    padding-left: root.in-detail ? Theme.space-1 : Theme.space-4;
+                    padding-right: Theme.space-2;
+                    spacing: Theme.space-1;
+                    if root.in-detail: IconBtn {
+                        icon: Icons.chevron-left;
+                        label: "Back to projects";
+                        icon-color: Theme.text;
+                        icon-size: 24px;
+                        clicked => { App.close-project(); }
+                    }
+                    Text {
+                        text: root.in-detail ? App.detail.title : root.titles[App.page];
+                        color: Theme.text;
+                        font-size: Theme.font-lg;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        accessible-role: text;
+                    }
+                    if App.page == 1 || App.page == 2: IconBtn {
+                        icon: Icons.sliders;
+                        label: App.page == 1 ? "Task settings" : "Time tracking settings";
+                        icon-color: Theme.text;
+                        clicked => {
+                            if App.page == 1 { App.open-task-settings(); }
+                            if App.page == 2 { App.open-time-settings(); }
+                        }
+                    }
+                    if !root.in-detail && App.page != 3: VerticalLayout {
+                        alignment: center;
+                        Btn {
+                            height: 38px;
+                            text: "Add";
+                            icon: Icons.plus;
+                            clicked => {
+                                if App.page == 0 { App.add-project(); }
+                                if App.page == 1 { App.add-task(); }
+                                if App.page == 2 { App.add-time-item(); }
+                            }
+                        }
+                    }
+                    IconBtn {
+                        icon: Theme.mode == 0 ? Icons.auto : Theme.mode == 1 ? Icons.sun : Icons.moon;
+                        label: Theme.mode == 0 ? "Theme: system" : Theme.mode == 1 ? "Theme: light" : "Theme: dark";
+                        icon-color: Theme.text;
+                        clicked => { App.cycle-theme(); }
+                    }
+                }
+            }
+
+            // Current page
+            Rectangle {
+                vertical-stretch: 1;
+                if App.page == 0 && !App.detail-open: ProjectsView { }
+                if root.in-detail: ProjectDetailView { }
+                if App.page == 1: TasksView { }
+                if App.page == 2: TimeView { }
+                if App.page == 3: CategoriesView { }
+            }
+
+            // Bottom navigation
+            Rectangle {
+                height: 60px + root.inset-bottom;
+                background: Theme.surface;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    padding-bottom: root.inset-bottom;
+                    NavTab { label: "Projects"; icon: Icons.folder; page: 0; }
+                    NavTab { label: "Tasks"; icon: Icons.tasks; page: 1; }
+                    NavTab { label: "Time"; icon: Icons.clock; page: 2; }
+                    NavTab { label: "Categories"; icon: Icons.tag; page: 3; }
+                }
+            }
+        }
+
+        // Bottom sheet for forms
+        if App.sheet != 0: Rectangle {
+            background: Theme.overlay;
+            TouchArea {
+                clicked => { App.close-sheet(); }
+            }
+            sheet := Rectangle {
+                property <length> max-h: root.height - root.inset-top - 24px;
+                width: min(root.width, 560px);
+                x: (root.width - self.width) / 2;
+                height: min(self.max-h, header.preferred-height + body.content-height + root.inset-bottom + root.keyboard);
+                y: root.height - self.height;
+                background: Theme.surface-raised;
+                border-top-left-radius: 20px;
+                border-top-right-radius: 20px;
+                // Swallow taps so they don't reach the overlay's close handler.
+                TouchArea { }
+                VerticalLayout {
+                    padding-bottom: max(root.inset-bottom, root.keyboard);
+                    header := HorizontalLayout {
+                        padding-left: Theme.space-4;
+                        padding-right: Theme.space-2;
+                        padding-top: Theme.space-2;
+                        height: 56px;
+                        Text {
+                            text: App.sheet-title;
+                            color: Theme.text;
+                            font-size: Theme.font-md;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+                        IconBtn {
+                            icon: Icons.close;
+                            label: "Close";
+                            clicked => { App.close-sheet(); }
+                        }
+                    }
+                    body := Flickable {
+                        vertical-stretch: 1;
+                        content-height: form.preferred-height;
+                        content-width: self.width;
+                        form := VerticalLayout {
+                            width: body.width;
+                            padding: Theme.space-4;
+                            padding-top: Theme.space-1;
+                            if App.sheet == 1: ProjectForm { }
+                            if App.sheet == 2: TaskForm { }
+                            if App.sheet == 3: TimeItemForm { }
+                            if App.sheet == 4: MergeForm { }
+                            if App.sheet == 5: TimeSettingsForm { }
+                            if App.sheet == 6: TaskSettingsForm { }
+                            if App.sheet == 7: DayNoteForm { }
+                            if App.sheet == 8: HistoryList { }
+                            if App.sheet == 9: RenameForm { }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Confirm / alert dialog
+        if App.dialog-visible: Rectangle {
+            background: Theme.overlay;
+            TouchArea { }
+            Rectangle {
+                width: min(root.width - 48px, 380px);
+                height: dialog-layout.preferred-height;
+                background: Theme.surface-raised;
+                border-radius: Theme.radius-md;
+                drop-shadow-blur: 16px;
+                drop-shadow-color: #00000040;
+                dialog-layout := VerticalLayout {
+                    padding: Theme.space-5;
+                    spacing: Theme.space-5;
+                    Text {
+                        text: App.dialog-message;
+                        color: Theme.text;
+                        font-size: Theme.font-base;
+                        wrap: word-wrap;
+                    }
+                    // A second action stacks the buttons so long labels fit on a phone.
+                    if App.dialog-alt-label != "": VerticalLayout {
+                        spacing: Theme.space-2;
+                        Btn {
+                            text: App.dialog-confirm-label;
+                            danger: App.dialog-danger;
+                            clicked => { App.dialog-confirmed(); }
+                        }
+                        Btn {
+                            text: App.dialog-alt-label;
+                            secondary: true;
+                            clicked => { App.dialog-alt(); }
+                        }
+                        if App.dialog-can-cancel: Btn {
+                            text: "Cancel";
+                            secondary: true;
+                            clicked => { App.dialog-cancelled(); }
+                        }
+                    }
+                    if App.dialog-alt-label == "": HorizontalLayout {
+                        spacing: Theme.space-3;
+                        alignment: end;
+                        if App.dialog-can-cancel: Btn {
+                            text: "Cancel";
+                            secondary: true;
+                            clicked => { App.dialog-cancelled(); }
+                        }
+                        Btn {
+                            text: App.dialog-confirm-label;
+                            danger: App.dialog-danger;
+                            clicked => { App.dialog-confirmed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
