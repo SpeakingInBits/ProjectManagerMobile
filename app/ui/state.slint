@@ -1,0 +1,230 @@
+// View models and the global the Rust side reads, writes and handles callbacks on.
+
+import { Date } from "std-widgets.slint";
+export { Date }
+
+export struct ProjectCardData {
+    id: string,
+    title: string,
+    description: string,
+    // Empty when the project has no due date.
+    due-label: string,
+    overdue: bool,
+    category-label: string,
+    // Progress bar fill, 0..1.
+    fill: float,
+    progress-label: string,
+    can-up: bool,
+    can-down: bool,
+}
+
+export struct TaskRowData {
+    id: string,
+    title: string,
+    completed: bool,
+    pinned: bool,
+    // Empty unless the list shows tasks from several projects.
+    project-label: string,
+    due-label: string,
+    overdue: bool,
+    repeats: bool,
+}
+
+export struct TimeItemData {
+    id: string,
+    // Category heading shown above the first item of each group; empty otherwise.
+    group-label: string,
+    title: string,
+    category: string,
+    description: string,
+    // Time was logged on the entry date.
+    worked: bool,
+    day-value: string,
+    note: string,
+    total: string,
+    week: string,
+    month: string,
+    can-subtract: bool,
+}
+
+export struct SummaryData {
+    name: string,
+    day: string,
+    week: string,
+    month: string,
+}
+
+export struct NamedRow {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+export struct HistoryRow {
+    date: string,
+    label: string,
+    minutes: string,
+    note: string,
+}
+
+export global App {
+    // Navigation: 0 = Projects, 1 = Tasks, 2 = Time, 3 = Categories.
+    in-out property <int> page: 0;
+    callback page-changed(int);
+    callback cycle-theme();
+
+    // Window metrics, kept current by the window so popups can center themselves.
+    in-out property <length> window-width;
+    in-out property <length> window-height;
+    pure callback format-date(Date) -> string;
+    in property <Date> today;
+
+    // Projects list
+    in property <[ProjectCardData]> projects;
+    callback add-project();
+    callback open-project(string);
+    callback move-project(string, bool);
+
+    // Project detail, shown over the Projects page.
+    in property <bool> detail-open;
+    in property <ProjectCardData> detail;
+    in property <[TaskRowData]> detail-tasks;
+    in-out property <bool> detail-show-completed;
+    callback detail-filter-changed();
+    callback close-project();
+    callback edit-project();
+    callback delete-project();
+    callback add-project-task();
+
+    // Tasks page. Scope: 0 = all tasks, 1 = standalone only.
+    in property <[TaskRowData]> tasks;
+    in-out property <int> tasks-scope;
+    in-out property <bool> tasks-show-completed;
+    callback tasks-filter-changed();
+    callback add-task();
+    callback open-task-settings();
+
+    // Task rows (Tasks page and project detail)
+    callback toggle-task(string);
+    callback pin-task(string);
+    callback edit-task(string);
+    callback delete-task(string);
+
+    // Time page
+    in property <[TimeItemData]> time-items;
+    in property <bool> time-is-today;
+    in property <string> time-day-label;
+    in property <string> time-warning;
+    in property <SummaryData> time-overall;
+    in property <[SummaryData]> time-category-cards;
+    callback add-time-item();
+    callback edit-time-item(string);
+    callback delete-time-item(string);
+    callback step-time(string, bool);
+    callback edit-note(string);
+    callback open-history(string);
+    callback open-time-settings();
+    callback time-use-today();
+
+    // Categories page
+    in property <[NamedRow]> categories;
+    in property <[NamedRow]> subcategories;
+    in property <string> selected-category-name;
+    in-out property <string> new-category-name;
+    in-out property <string> new-subcategory-name;
+    callback select-category(string);
+    callback add-category();
+    callback add-subcategory();
+    callback rename-category(string);
+    callback delete-category(string);
+    callback rename-subcategory(string);
+    callback delete-subcategory(string);
+
+    // Bottom sheet: 0 = closed, 1 = project, 2 = task, 3 = time item, 4 = merge,
+    // 5 = time settings, 6 = task settings, 7 = day note, 8 = history, 9 = rename.
+    in-out property <int> sheet: 0;
+    in property <string> sheet-title;
+    callback close-sheet();
+
+    // Category pickers shared by the project and task forms (index 0 = no category).
+    in property <[string]> category-options;
+    pure callback subcategory-options(int) -> [string];
+
+    // Project form
+    in-out property <string> pf-title;
+    in-out property <string> pf-description;
+    in-out property <Date> pf-due;
+    in-out property <bool> pf-has-due;
+    in-out property <int> pf-category;
+    in-out property <int> pf-subcategory;
+    in-out property <bool> pf-title-missing;
+    in property <bool> pf-editing;
+    callback submit-project();
+
+    // Task form. Repeat: 0 = never, 1 = daily, 2 = weekly, 3 = monthly, 4 = yearly,
+    // 5 = custom, 6 = movable.
+    in-out property <string> tf-title;
+    in-out property <string> tf-description;
+    in-out property <Date> tf-due;
+    in-out property <bool> tf-has-due;
+    in-out property <int> tf-project;
+    in-out property <int> tf-category;
+    in-out property <int> tf-subcategory;
+    in-out property <int> tf-repeat;
+    in-out property <string> tf-interval;
+    in-out property <bool> tf-title-missing;
+    in property <bool> tf-editing;
+    in property <[string]> project-options;
+    callback submit-task();
+
+    // Time item form
+    in-out property <string> ef-title;
+    in-out property <string> ef-description;
+    in-out property <int> ef-category;
+    in-out property <bool> ef-title-missing;
+    in property <bool> ef-editing;
+    in property <bool> ef-can-merge;
+    callback submit-time-item();
+    callback open-merge();
+
+    // Merge one time item into another (index 0 = none chosen yet).
+    in property <[string]> merge-options;
+    in-out property <int> merge-index;
+    in property <string> merge-summary;
+    callback submit-merge();
+
+    // Time settings
+    in-out property <Date> ts-date;
+    in-out property <bool> ts-group;
+    in-out property <bool> ts-sort;
+    callback submit-time-settings();
+
+    // Task settings
+    in-out property <bool> ks-confirm;
+    callback submit-task-settings();
+
+    // Day note
+    in-out property <string> note-text;
+    in property <string> note-subtitle;
+    callback submit-note();
+
+    // Day-by-day history of a time item
+    in property <[HistoryRow]> history-rows;
+    callback history-pick(string);
+
+    // Rename a category or subcategory
+    in-out property <string> rename-text;
+    in-out property <bool> rename-missing;
+    callback submit-rename();
+
+    // Confirm / alert dialog, with an optional second action (alt).
+    in property <bool> dialog-visible;
+    in property <string> dialog-message;
+    in property <string> dialog-confirm-label;
+    in property <string> dialog-alt-label;
+    in property <bool> dialog-can-cancel;
+    in property <bool> dialog-danger;
+    callback dialog-confirmed();
+    callback dialog-alt();
+    callback dialog-cancelled();
+}

@@ -1,0 +1,296 @@
+// The main screens.
+
+import { Theme, Icons, Icon, IconBtn, Btn, Card, Segmented, EmptyState, Badge, ToggleRow, TextField } from "theme.slint";
+import { ProjectCard, TaskRow, ProgressBar, SummaryCard, TimeItemCard, LinkBtn } from "components.slint";
+import { App, NamedRow } from "state.slint";
+
+// Vertically scrolling page body.
+component Page inherits Flickable {
+    content-height: content.preferred-height;
+    content-width: self.width;
+    content := VerticalLayout {
+        width: root.width;
+        padding: Theme.space-4;
+        spacing: Theme.space-4;
+        @children
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.text;
+    font-size: Theme.font-md;
+    font-weight: 600;
+    vertical-alignment: center;
+}
+
+export component ProjectsView inherits Page {
+    if App.projects.length == 0: EmptyState {
+        message: "No projects yet. Tap Add to create your first project.";
+        icon: Icons.folder;
+    }
+    for project in App.projects: ProjectCard { data: project; }
+}
+
+export component ProjectDetailView inherits Page {
+    if App.detail.description != "": Text {
+        text: App.detail.description;
+        color: Theme.text;
+        font-size: Theme.font-base;
+        wrap: word-wrap;
+    }
+    if App.detail.due-label != "" || App.detail.category-label != "": HorizontalLayout {
+        spacing: Theme.space-1;
+        alignment: start;
+        if App.detail.due-label != "": Badge {
+            text: App.detail.due-label;
+            overdue: App.detail.overdue;
+        }
+        if App.detail.category-label != "": Badge { text: App.detail.category-label; }
+    }
+    VerticalLayout {
+        spacing: Theme.space-2;
+        ProgressBar { fill: App.detail.fill; }
+        Text {
+            text: App.detail.progress-label;
+            color: Theme.text-muted;
+            font-size: Theme.font-sm;
+        }
+    }
+    HorizontalLayout {
+        spacing: Theme.space-3;
+        Btn {
+            horizontal-stretch: 1;
+            text: "Edit";
+            icon: Icons.edit;
+            secondary: true;
+            clicked => { App.edit-project(); }
+        }
+        Btn {
+            horizontal-stretch: 1;
+            text: "Delete";
+            icon: Icons.trash;
+            danger: true;
+            clicked => { App.delete-project(); }
+        }
+    }
+    HorizontalLayout {
+        padding-top: Theme.space-2;
+        SectionTitle {
+            text: "Tasks";
+            horizontal-stretch: 1;
+        }
+        VerticalLayout {
+            alignment: center;
+            Btn {
+                height: 38px;
+                text: "Add task";
+                icon: Icons.plus;
+                clicked => { App.add-project-task(); }
+            }
+        }
+    }
+    ToggleRow {
+        text: "Show completed tasks";
+        checked <=> App.detail-show-completed;
+        changed => { App.detail-filter-changed(); }
+    }
+    VerticalLayout {
+        spacing: Theme.space-2;
+        if App.detail-tasks.length == 0: EmptyState {
+            message: "No tasks to show.";
+            icon: Icons.tasks;
+        }
+        for task in App.detail-tasks: TaskRow { data: task; }
+    }
+}
+
+export component TasksView inherits Page {
+    Segmented {
+        options: ["All tasks", "Standalone"];
+        selected <=> App.tasks-scope;
+        changed => { App.tasks-filter-changed(); }
+    }
+    ToggleRow {
+        text: "Show completed";
+        checked <=> App.tasks-show-completed;
+        changed => { App.tasks-filter-changed(); }
+    }
+    VerticalLayout {
+        spacing: Theme.space-2;
+        if App.tasks.length == 0: EmptyState {
+            message: "No tasks to show.";
+            icon: Icons.tasks;
+        }
+        for task in App.tasks: TaskRow { data: task; }
+    }
+}
+
+export component TimeView inherits Page {
+    if !App.time-is-today: Rectangle {
+        background: Theme.warning-bg;
+        border-color: Theme.warning-border;
+        border-width: 1px;
+        border-radius: Theme.radius-md;
+        accessible-role: text;
+        accessible-label: App.time-warning;
+        VerticalLayout {
+            padding: Theme.space-3;
+            spacing: Theme.space-1;
+            Text {
+                text: App.time-warning;
+                color: Theme.warning-text;
+                font-size: Theme.font-sm + 1px;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                alignment: start;
+                Btn {
+                    height: 38px;
+                    text: "Switch back to today";
+                    secondary: true;
+                    clicked => { App.time-use-today(); }
+                }
+            }
+        }
+    }
+    if App.time-items.length == 0: EmptyState {
+        message: "No time-tracked items yet. Tap Add to start logging time.";
+        icon: Icons.clock;
+    }
+    if App.time-items.length > 0: SummaryCard {
+        data: App.time-overall;
+        large: true;
+    }
+    if App.time-category-cards.length > 0: VerticalLayout {
+        spacing: Theme.space-2;
+        for card in App.time-category-cards: SummaryCard { data: card; }
+    }
+    for item in App.time-items: VerticalLayout {
+        spacing: Theme.space-2;
+        if item.group-label != "": SectionTitle {
+            text: item.group-label;
+            height: 36px;
+        }
+        TimeItemCard { data: item; }
+    }
+}
+
+component NameRow inherits Rectangle {
+    in property <NamedRow> data;
+    in property <bool> selectable;
+    in property <string> kind;
+    callback select();
+    callback rename();
+    callback delete();
+    height: Theme.tap + Theme.space-1;
+    border-radius: Theme.radius-sm;
+    background: data.active ? Theme.primary-soft : touch.pressed && selectable ? Theme.bg : transparent;
+    touch := TouchArea {
+        enabled: root.selectable;
+        clicked => { root.select(); }
+    }
+    HorizontalLayout {
+        padding-left: Theme.space-3;
+        Text {
+            text: root.data.name;
+            color: root.data.active ? Theme.primary : Theme.text;
+            font-size: Theme.font-base;
+            font-weight: root.data.active ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            accessible-role: text;
+            accessible-label: root.data.name + (root.data.active ? ", selected" : "");
+        }
+        IconBtn {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.edit;
+            label: "Rename " + root.kind + " " + root.data.name;
+            clicked => { root.rename(); }
+        }
+        IconBtn {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.trash;
+            label: "Delete " + root.kind + " " + root.data.name;
+            clicked => { root.delete(); }
+        }
+    }
+}
+
+component AddRow inherits HorizontalLayout {
+    in property <string> placeholder;
+    in property <string> button;
+    in-out property <string> text;
+    callback add();
+    spacing: Theme.space-2;
+    TextField {
+        horizontal-stretch: 1;
+        placeholder: root.placeholder;
+        text <=> root.text;
+        accepted => { root.add(); }
+    }
+    Btn {
+        text: root.button;
+        enabled: root.text != "";
+        clicked => { root.add(); }
+    }
+}
+
+export component CategoriesView inherits Page {
+    Card {
+        SectionTitle { text: "Categories"; }
+        AddRow {
+            placeholder: "New category name";
+            button: "Add";
+            text <=> App.new-category-name;
+            add => { App.add-category(); }
+        }
+        if App.categories.length == 0: Text {
+            text: "No categories yet. Add one above.";
+            color: Theme.text-muted;
+            font-size: Theme.font-sm + 1px;
+        }
+        VerticalLayout {
+            for category in App.categories: NameRow {
+                data: category;
+                selectable: true;
+                kind: "category";
+                select => { App.select-category(category.id); }
+                rename => { App.rename-category(category.id); }
+                delete => { App.delete-category(category.id); }
+            }
+        }
+    }
+
+    Card {
+        if App.selected-category-name == "": Text {
+            text: "Select a category to manage its subcategories.";
+            color: Theme.text-muted;
+            font-size: Theme.font-sm + 1px;
+            wrap: word-wrap;
+        }
+        if App.selected-category-name != "": SectionTitle {
+            text: "Subcategories of \"" + App.selected-category-name + "\"";
+            wrap: word-wrap;
+        }
+        if App.selected-category-name != "": AddRow {
+            placeholder: "New subcategory name";
+            button: "Add";
+            text <=> App.new-subcategory-name;
+            add => { App.add-subcategory(); }
+        }
+        if App.selected-category-name != "" && App.subcategories.length == 0: Text {
+            text: "No subcategories yet.";
+            color: Theme.text-muted;
+            font-size: Theme.font-sm + 1px;
+        }
+        VerticalLayout {
+            for sub in App.subcategories: NameRow {
+                data: sub;
+                kind: "subcategory";
+                rename => { App.rename-subcategory(sub.id); }
+                delete => { App.delete-subcategory(sub.id); }
+            }
+        }
+    }
+}
