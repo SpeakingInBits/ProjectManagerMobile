@@ -165,6 +165,10 @@ the two once an import/export feature exists. A file that can't be read is renam
   standalone** and **Cancel**, instead of two OK/Cancel prompts.
 - **Categories** are renamed in a sheet instead of inline, and are listed in the order they were
   created.
+- **Monthly and yearly repeats** stay on their day of the month. A short month gets its last day
+  instead: a task due on the 31st repeats Jan 31, Feb 28, Mar 31, Apr 30. A yearly task due
+  Feb 29 falls on Feb 28 in other years. (The web app overflows like JavaScript dates, so Jan 31
+  is followed by Mar 3 and the series drifts.)
 - **The − button** on a time item is disabled when nothing is logged on the entry day (the web app
   disables it only when the item has no time at all).
 - **Demo data** comes from the desktop build's `--seed` option instead of the devtools console.

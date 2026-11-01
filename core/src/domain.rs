@@ -3,27 +3,33 @@
 
 use std::cmp::Ordering;
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 
-use crate::date::{add_days, add_months, add_years};
+use crate::date::{add_days, add_months_on_day};
 use crate::model::{RepeatConfig, Task};
 
 /// Next due date of a repeating task. `daily`/`weekly`/`monthly`/`yearly`/`custom` are
 /// schedule-anchored: the next date is computed from the previous due date, so a weekly Monday
 /// task completed on a Wednesday is still next due the following Monday (no drift). `movable` is
 /// completion-anchored: it always counts from when the task was actually completed.
+///
+/// Monthly and yearly repeats fall on `anchor_day` (the base date's day when `None`), or on the
+/// last day of a month too short for it: a series anchored on the 31st goes Jan 31, Feb 28,
+/// Mar 31. The web app instead overflows like JavaScript dates (Jan 31 + 1 month = Mar 3).
 pub fn next_due_date(
     repeat: RepeatConfig,
     completion: NaiveDate,
     previous_due: Option<NaiveDate>,
+    anchor_day: Option<u32>,
 ) -> Option<NaiveDate> {
     let base = previous_due.unwrap_or(completion);
+    let day = anchor_day.unwrap_or_else(|| base.day());
     match repeat {
         RepeatConfig::Never => None,
         RepeatConfig::Daily => Some(add_days(base, 1)),
         RepeatConfig::Weekly => Some(add_days(base, 7)),
-        RepeatConfig::Monthly => Some(add_months(base, 1)),
-        RepeatConfig::Yearly => Some(add_years(base, 1)),
+        RepeatConfig::Monthly => Some(add_months_on_day(base, 1, day)),
+        RepeatConfig::Yearly => Some(add_months_on_day(base, 12, day)),
         RepeatConfig::Custom { interval_days } => Some(add_days(base, i64::from(interval_days))),
         RepeatConfig::Movable { interval_days } => {
             Some(add_days(completion, i64::from(interval_days)))
@@ -98,7 +104,7 @@ mod tests {
     fn next_due_date_follows_each_repeat_kind() {
         let completed_wed = parse_iso("2026-07-29");
         let due_mon = parse_iso("2026-07-27");
-        let next = |r| iso(next_due_date(r, completed_wed.unwrap(), due_mon));
+        let next = |r| iso(next_due_date(r, completed_wed.unwrap(), due_mon, None));
 
         assert_eq!(next(RepeatConfig::Never), None);
         // Schedule-anchored kinds advance from the previous due date, not the completion date.
@@ -120,10 +126,48 @@ mod tests {
             iso(next_due_date(
                 RepeatConfig::Weekly,
                 completed_wed.unwrap(),
+                None,
                 None
             ))
             .as_deref(),
             Some("2026-08-05")
+        );
+    }
+
+    #[test]
+    fn monthly_and_yearly_repeats_stay_on_their_day() {
+        let due = |iso: &str| parse_iso(iso).unwrap();
+        let next = |r, previous: &str, anchor| {
+            iso(next_due_date(
+                r,
+                due("2026-01-01"),
+                Some(due(previous)),
+                anchor,
+            ))
+            .unwrap()
+        };
+        // A short month takes its last day instead of overflowing into the next month.
+        assert_eq!(
+            next(RepeatConfig::Monthly, "2026-01-31", None),
+            "2026-02-28"
+        );
+        assert_eq!(
+            next(RepeatConfig::Monthly, "2028-01-31", None),
+            "2028-02-29"
+        );
+        // The anchor brings the series back to its day once months are long enough again.
+        assert_eq!(
+            next(RepeatConfig::Monthly, "2026-02-28", Some(31)),
+            "2026-03-31"
+        );
+        assert_eq!(
+            next(RepeatConfig::Monthly, "2026-03-31", Some(31)),
+            "2026-04-30"
+        );
+        assert_eq!(next(RepeatConfig::Yearly, "2028-02-29", None), "2029-02-28");
+        assert_eq!(
+            next(RepeatConfig::Yearly, "2031-02-28", Some(29)),
+            "2032-02-29"
         );
     }
 
