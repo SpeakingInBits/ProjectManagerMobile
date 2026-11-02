@@ -11,6 +11,10 @@ val rustAbis = listOf("arm64-v8a", "x86_64")
 val minSdkVersion = 26
 val compileSdkVersion = 36
 
+// Release builds are signed with this keystore when it's given (the release workflow passes it from
+// repository secrets); otherwise they're left unsigned.
+val releaseKeystore = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+
 android {
     namespace = "com.speakinginbits.projectmanager"
     compileSdk = compileSdkVersion
@@ -20,14 +24,31 @@ android {
         // API 26 (Android 8.0) is the minimum Slint's Android backend supports.
         minSdk = minSdkVersion
         targetSdk = compileSdkVersion
-        versionCode = 1
-        versionName = "0.1.0"
+        // The release workflow passes -PversionCode and -PversionName for each release.
+        versionCode = providers.gradleProperty("versionCode").map(String::toInt).getOrElse(1)
+        versionName = providers.gradleProperty("versionName").getOrElse("0.1.0")
         ndk { abiFilters += rustAbis }
+    }
+
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").get()
+                // Keystores made with keytool's defaults use the store password for the key too.
+                keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD")
+                    .orElse(providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD")).get()
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseKeystore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

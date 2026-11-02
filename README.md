@@ -140,6 +140,45 @@ and run on a simulator or device. Xcode runs `build_for_ios_with_cargo.bash`, wh
 
 The bundle id is `com.speakinginbits.projectmanager` (set in `app/ios/project.yml`).
 
+## Releasing
+
+Run the **Release** workflow from the repository's **Actions** tab, on `main`. Pick what the
+release contains (bug fixes, new features or breaking changes) and it bumps the latest `vX.Y.Z`
+tag to match, or type a version to use instead. It stamps the version into both apps, builds them
+(`packaging/package-android.sh` on Linux, `packaging/package-ios.sh` on a Mac), and publishes a
+GitHub release with:
+
+- `ProjectManager-android.apk`, to install on a phone, and `ProjectManager-android.aab`, for Google
+  Play.
+- `ProjectManager-ios.ipa`.
+
+Pull requests that change `packaging/`, `app/android/`, `app/ios/` or the workflow build both apps
+the same way without releasing.
+
+The packages are signed when these repository secrets are set (**Settings → Secrets and variables
+→ Actions**). Without them, the workflow still runs and names the files `*-unsigned`.
+
+| Secret | What it is |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | The release keystore, base64-encoded. Keep the keystore safe: updates must be signed with the same key. |
+| `ANDROID_KEYSTORE_PASSWORD` | The keystore's password. |
+| `ANDROID_KEY_ALIAS` | The key's alias in the keystore. |
+| `ANDROID_KEY_PASSWORD` | The key's password, if it differs from the keystore's. |
+| `IOS_CERTIFICATE_P12_BASE64` | An Apple Distribution (or Development) certificate and its private key, exported from Keychain Access as a `.p12` and base64-encoded. |
+| `IOS_CERTIFICATE_PASSWORD` | The `.p12` file's password. |
+| `IOS_PROVISIONING_PROFILE_BASE64` | A provisioning profile for `com.speakinginbits.projectmanager` that includes that certificate, base64-encoded. An ad hoc profile gives an `.ipa` for the devices it lists; an App Store profile gives one for TestFlight and the App Store. |
+
+To make an Android keystore and copy it base64-encoded (macOS; on Linux use `base64 -w0` and save
+the output):
+
+```bash
+keytool -genkeypair -v -keystore release.jks -alias projectmanager -keyalg RSA -keysize 2048 -validity 10000
+```
+
+```bash
+base64 -i release.jks | pbcopy
+```
+
 ## Your data
 
 Data is stored in a single file, `project-manager.json`, in the app's private storage: internal
