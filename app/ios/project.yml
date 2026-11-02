@@ -10,6 +10,8 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "15.0"
+    # A shared scheme, so xcodebuild can archive the app on CI (packaging/package-ios.sh).
+    scheme: {}
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.speakinginbits.projectmanager
       MARKETING_VERSION: "0.1.0"

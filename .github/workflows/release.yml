@@ -1,0 +1,160 @@
+name: Release
+
+# Run from the Actions tab: builds the Android and iOS apps and publishes a GitHub release with the packages.
+on:
+  workflow_dispatch:
+    inputs:
+      change:
+        description: What's in this release (picks the next version number)
+        type: choice
+        options:
+          - Bug fixes
+          - New features
+          - Breaking changes
+        default: Bug fixes
+      version:
+        description: Version number, e.g. 1.0.0 (optional; overrides the calculated one)
+        type: string
+        required: false
+  # Pull requests that change the packaging build every package without releasing, so problems show up before a release.
+  pull_request:
+    branches: [main]
+    paths:
+      - packaging/**
+      - app/android/**
+      - app/ios/**
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+# Two releases at once could pick the same version number.
+concurrency:
+  group: release-${{ github.event_name }}
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - name: Only release from main
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases are made from main. Choose main in 'Use workflow from'."
+          exit 1
+
+      - uses: actions/checkout@v5
+        with:
+          # The tags are needed to find the latest release.
+          fetch-depth: 0
+
+      - name: Next version
+        id: next
+        env:
+          # Pull requests have no inputs.
+          CHANGE: ${{ inputs.change || 'Bug fixes' }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version=$(bash packaging/next-version.sh "$CHANGE" "$REQUESTED")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version" >> "$GITHUB_STEP_SUMMARY"
+
+  android:
+    name: build (android)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The Android Gradle plugin needs JDK 17 or later.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-linux-android,x86_64-linux-android
+          rustup default stable
+          cargo install cargo-ndk --locked
+
+      # The runner has the Android SDK and NDK; this adds the platform the app compiles against (compileSdk).
+      - name: Install the Android SDK platform
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36"'
+
+      - name: Build and package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash packaging/package-android.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-android
+          path: dist/*
+          if-no-files-found: error
+
+  ios:
+    name: build (ios)
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust and XcodeGen
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-apple-ios
+          rustup default stable
+          brew install xcodegen
+
+      - name: Build and package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: bash packaging/package-ios.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages-ios
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [version, android, ios]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cp packaging/release-notes.md notes.md
+          if compgen -G 'dist/*-unsigned.*' > /dev/null; then
+            cat >> notes.md << 'EOF'
+
+          ### Unsigned packages
+
+          Files ending in `-unsigned` weren't signed, because the repository's signing secrets aren't set. Android won't install an unsigned APK, and an unsigned `.ipa` only installs with a sideloading tool that signs it, such as AltStore or Sideloadly.
+          EOF
+          fi
+          # The install instructions come first, then GitHub's list of changes since the last release.
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md --generate-notes
