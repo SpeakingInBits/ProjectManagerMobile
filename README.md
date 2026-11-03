@@ -105,8 +105,16 @@ Studio's bundled JDK works):
 ./gradlew installDebug
 ```
 
-The build always compiles the Rust code in release mode, for both `arm64-v8a` (phones) and
-`x86_64` (emulators).
+The Rust code is always optimized, since unoptimized Rust is too slow on a device. Release builds
+use the `release` profile (whole-program optimization, for small, fast store packages) for both
+`arm64-v8a` (phones) and `x86_64` (emulators). Debug builds use the `android-dev` profile in
+`Cargo.toml`, which skips the whole-program optimization so rebuilds are much quicker, and when
+Android Studio runs the app they build only for the device or emulator's ABI. From the command
+line, pass that ABI to get the same:
+
+```bash
+./gradlew installDebug -Pandroid.injected.build.abi=x86_64
+```
 
 Debug builds let you read or replace the app's data file over adb, which is handy for testing:
 

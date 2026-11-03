@@ -53,6 +53,10 @@ android {
     }
 }
 
+// Android Studio sets this to the ABIs of the device or emulator it's about to run the app on.
+val deviceAbis = providers.gradleProperty("android.injected.build.abi").orNull
+    ?.split(",")?.filter { it in rustAbis }?.takeIf { it.isNotEmpty() }
+
 /** Builds libproject_app.so for each ABI with cargo-ndk, into [outputDir]. */
 abstract class CargoNdkBuild : DefaultTask() {
     @get:OutputDirectory
@@ -60,6 +64,10 @@ abstract class CargoNdkBuild : DefaultTask() {
 
     @get:Input
     abstract val abis: ListProperty<String>
+
+    /** The Cargo profile: `release`, or `android-dev` (see the workspace Cargo.toml). */
+    @get:Input
+    abstract val profile: Property<String>
 
     @get:Input
     abstract val minSdk: Property<Int>
@@ -80,13 +88,15 @@ abstract class CargoNdkBuild : DefaultTask() {
 
     @TaskAction
     fun build() {
+        val outDir = outputDir.get().asFile
+        // Start empty, so a library for an ABI this build skips isn't left from an earlier build.
+        outDir.deleteRecursively()
         val args = mutableListOf("cargo", "ndk")
         abis.get().forEach { args += listOf("-t", it) }
-        // Always an optimized build: debug Rust is far slower and the APK runs on devices.
         args += listOf(
             "-P", minSdk.get().toString(),
-            "-o", outputDir.get().asFile.absolutePath,
-            "build", "--release", "-p", "project-app", "--lib",
+            "-o", outDir.absolutePath,
+            "build", "--profile", profile.get(), "-p", "project-app", "--lib",
         )
         execOps.exec {
             workingDir(workspaceDir.get().asFile)
@@ -98,19 +108,25 @@ abstract class CargoNdkBuild : DefaultTask() {
     }
 }
 
-val cargoBuild = tasks.register<CargoNdkBuild>("cargoBuild") {
-    abis.set(rustAbis)
-    minSdk.set(minSdkVersion)
-    workspaceDir.set(rootProject.layout.projectDirectory.dir("../.."))
-    androidJar.set(
-        androidComponents.sdkComponents.sdkDirectory.map {
-            it.file("platforms/android-$compileSdkVersion/android.jar").asFile.absolutePath
-        },
-    )
-}
-
 androidComponents {
     onVariants { variant ->
+        val debug = variant.buildType == "debug"
+        val cargoBuild = tasks.register<CargoNdkBuild>(
+            "cargoBuild${variant.name.replaceFirstChar(Char::uppercase)}",
+        ) {
+            // Always optimized, since debug Rust is far too slow on a device. Debug builds skip
+            // release's slow whole-program optimization, and build only for the device Android
+            // Studio is running the app on.
+            profile.set(if (debug) "android-dev" else "release")
+            abis.set(if (debug) deviceAbis ?: rustAbis else rustAbis)
+            minSdk.set(minSdkVersion)
+            workspaceDir.set(rootProject.layout.projectDirectory.dir("../.."))
+            androidJar.set(
+                androidComponents.sdkComponents.sdkDirectory.map {
+                    it.file("platforms/android-$compileSdkVersion/android.jar").asFile.absolutePath
+                },
+            )
+        }
         variant.sources.jniLibs?.addGeneratedSourceDirectory(cargoBuild, CargoNdkBuild::outputDir)
     }
 }

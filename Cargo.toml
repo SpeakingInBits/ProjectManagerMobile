@@ -15,3 +15,11 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+# Android debug builds: still optimized so the UI runs smoothly on a device, but without release's
+# whole-program optimization, which makes every rebuild take minutes.
+[profile.android-dev]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
